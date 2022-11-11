@@ -9,7 +9,48 @@ from std_msgs.msg import Empty
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Twist, Pose2D
 
-# theta = self.pose.theta
+
+def checkBounds(error):
+    if error < -pi:
+        return error + 2 * pi
+
+    if error > pi:
+        return error - 2 * pi
+
+    return error
+
+
+class Controller:
+    def __init__(self, P=0.0, D=0.0, set_point=0):
+        self.Kp = P
+        self.Kd = D
+        self.set_point = set_point  # reference (desired value)
+        self.previous_error = 0
+
+    def check_Set_Point_Bounds(self):
+        if self.set_point > pi:
+            self.set_point = self.set_point - 2 * pi
+
+        if self.set_point < -pi:  # This case should be unreachable, here for safety
+            self.set_point = self.set_point + 2 * pi
+
+    def update(self, current_value):
+        # calculate error, P_term, and D_term
+        error = checkBounds(current_value - self.set_point)
+        P_term = self.Kp * error
+        D_term = self.Kd * self.previous_error
+
+        self.previous_error = error
+        return P_term + D_term
+
+    def setPoint(self, set_point):
+        self.check_Set_Point_Bounds()
+        self.previous_error = 0
+
+    def setPD(self, P=0.0, D=0.0):
+        self.Kp = P
+        self.Kd = D
+
 
 class Turtlebot():
     def __init__(self):
@@ -30,11 +71,14 @@ class Turtlebot():
         self.trajectory = list()
         self.odom_sub = rospy.Subscriber("odom", Odometry, self.odom_callback)
 
+        # Waypoint variables
         self.previous_waypoint = np.matrix([0, 0])
         self.previous_velocity = np.matrix([0, 0])
         self.velocity = 0.5
 
-        self.vel = Twist() # Velocity X and Velocity Theta
+        # Controller variables
+        self.controller = Controller(1.0)
+        self.vel = Twist()  # Velocity X and Velocity Theta
 
         try:
             self.run()
@@ -56,21 +100,49 @@ class Turtlebot():
         # next_waypoint is to help determine the velocity to pass current_waypoint
 
         T = 2
-        c = 5  # Placeholder
+        c = 10  # May need to be tweaked!!
 
-        # coeffX
-        # coeffY
+        # X and Y end velocity (dx/dt | dy/dt)
+        v_end_x = (current_waypoint[0] - next_waypoint[0]) / T
+        v_end_y = (current_waypoint[1] - next_waypoint[1]) / T
+
+        aX = self.polynomial_time_scaling_3rd_order(self.previous_waypoint.item(0), self.previous_velocity.item(0),
+                                                    current_waypoint[0], v_end_x,
+                                                    T)  # Coefficients for 3rd order polynomial for X coordinates
+        aY = self.polynomial_time_scaling_3rd_order(self.previous_waypoint.item(1), self.previous_velocity.item(1),
+                                                    current_waypoint[1], v_end_y,
+                                                    T)  # Coefficients for 3rd order polynomial for Y coordinates
 
         for i in range(c * T):
             t = i * 0.1
+            posX = aX.item(0) + aX.item(1) * t + aX.item(2) * pow(t, 2) + aX.item(3) * pow(t, 3)
+            posY = aY.item(0) + aY.item(1) * t + aY.item(2) * pow(t, 2) + aY.item(3) * pow(t, 3)
+
+            velX = aX.item(1) + 2 * aX.item(2) * t + 3 * aX.item(3) * pow(t, 2)
+            velY = aY.item(1) + 2 * aY.item(2) * t + 3 * aY.item(3) * pow(t, 2)
+
+            # Update controller set point and velocity with values retrieved from polynomial fcn
+            self.controller.setPoint(atan2(posY, posX))
+
+            self.vel.linear.x = sqrt(pow(velX, 2) + pow(velY, 2)) * 0.5
+            self.vel.angular.z = self.controller.update(self.pose.theta)
+
+            # Tell robot to execute velocity
+            self.vel_pub.publish(self.vel)
+            self.rate.sleep()
+
+        self.previous_waypoint = np.matrix([current_waypoint[0], current_waypoint[1]])
+        self.previous_velocity = np.matrix([v_end_x, v_end_y])
         pass
 
     def polynomial_time_scaling_3rd_order(self, p_start, v_start, p_end, v_end, T):
         # input: p,v: position and velocity of start/end point
         #        T: the desired time to complete this segment of trajectory (in second)
         # output: the coefficients of this polynomial
-        polynomialMtx = np.matrix([[0, 0, 0, 1], [pow(T, 3), pow(T, 2), T, 1], [0, 0, 1, 0], [3 * pow(T, 2), 2 * T, 1, 0]])
-        return np.dot(np.linalg.inv(polynomialMtx), np.matrix([p_start, p_end, v_start, v_end]))
+        polynomialMtx = np.matrix(
+            [[0, 0, 0, 1], [pow(T, 3), pow(T, 2), T, 1], [0, 0, 1, 0], [3 * pow(T, 2), 2 * T, 1, 0]])
+        constraintMtx = np.matrix([p_start, p_end, v_start, v_end])
+        return np.linalg.inv(polynomialMtx) * np.transpose(constraintMtx)
 
     def odom_callback(self, msg):
         # get pose = (x, y, theta) from odometry topic
