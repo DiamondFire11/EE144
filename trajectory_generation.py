@@ -9,7 +9,6 @@ from std_msgs.msg import Empty
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Twist, Pose2D
 
-
 def checkBounds(error):
     if error < -pi:
         return error + 2 * pi
@@ -106,25 +105,21 @@ class Turtlebot():
         v_end_x = (current_waypoint[0] - next_waypoint[0]) / T
         v_end_y = (current_waypoint[1] - next_waypoint[1]) / T
 
-        aX = self.polynomial_time_scaling_3rd_order(self.previous_waypoint.item(0), self.previous_velocity.item(0),
-                                                    current_waypoint[0], v_end_x,
-                                                    T)  # Coefficients for 3rd order polynomial for X coordinates
-        aY = self.polynomial_time_scaling_3rd_order(self.previous_waypoint.item(1), self.previous_velocity.item(1),
-                                                    current_waypoint[1], v_end_y,
-                                                    T)  # Coefficients for 3rd order polynomial for Y coordinates
+        aX = self.polynomial_time_scaling_3rd_order(self.previous_waypoint.item(0), self.previous_velocity.item(0), current_waypoint[0], v_end_x, T)  # Coefficients for 3rd order polynomial for X coordinates
+        aY = self.polynomial_time_scaling_3rd_order(self.previous_waypoint.item(1), self.previous_velocity.item(1), current_waypoint[1], v_end_y, T)  # Coefficients for 3rd order polynomial for Y coordinates
 
         for i in range(c * T):
             t = i * 0.1
-            posX = aX.item(0) + aX.item(1) * t + aX.item(2) * pow(t, 2) + aX.item(3) * pow(t, 3)
-            posY = aY.item(0) + aY.item(1) * t + aY.item(2) * pow(t, 2) + aY.item(3) * pow(t, 3)
+            posX = aX.item(3) + aX.item(2) * t + aX.item(1) * pow(t, 2) + aX.item(0) * pow(t, 3)
+            posY = aY.item(3) + aY.item(2) * t + aY.item(1) * pow(t, 2) + aY.item(0) * pow(t, 3)
 
-            velX = aX.item(1) + 2 * aX.item(2) * t + 3 * aX.item(3) * pow(t, 2)
-            velY = aY.item(1) + 2 * aY.item(2) * t + 3 * aY.item(3) * pow(t, 2)
+            velX = aX.item(2) + 2 * aX.item(1) * t + 3 * aX.item(0) * pow(t, 2)
+            velY = aY.item(2) + 2 * aY.item(1) * t + 3 * aY.item(0) * pow(t, 2)
 
             # Update controller set point and velocity with values retrieved from polynomial fcn
             self.controller.setPoint(atan2(posY, posX))
 
-            self.vel.linear.x = sqrt(pow(velX, 2) + pow(velY, 2)) * 0.5
+            self.vel.linear.x = sqrt(pow(velX, 2) + pow(velY, 2))
             self.vel.angular.z = self.controller.update(self.pose.theta)
 
             # Tell robot to execute velocity
@@ -139,8 +134,7 @@ class Turtlebot():
         # input: p,v: position and velocity of start/end point
         #        T: the desired time to complete this segment of trajectory (in second)
         # output: the coefficients of this polynomial
-        polynomialMtx = np.matrix(
-            [[0, 0, 0, 1], [pow(T, 3), pow(T, 2), T, 1], [0, 0, 1, 0], [3 * pow(T, 2), 2 * T, 1, 0]])
+        polynomialMtx = np.matrix([[0, 0, 0, 1], [pow(T, 3), pow(T, 2), T, 1], [0, 0, 1, 0], [3 * pow(T, 2), 2 * T, 1, 0]])
         constraintMtx = np.matrix([p_start, p_end, v_start, v_end])
         return np.linalg.inv(polynomialMtx) * np.transpose(constraintMtx)
 
