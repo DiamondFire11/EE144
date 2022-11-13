@@ -9,6 +9,7 @@ from std_msgs.msg import Empty
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Twist, Pose2D
 
+
 def checkBounds(error):
     if error < -pi:
         return error + 2 * pi
@@ -35,7 +36,7 @@ class Controller:
 
     def update(self, current_value):
         # calculate error, P_term, and D_term
-        error = checkBounds(current_value - self.set_point)
+        error = checkBounds(self.set_point - current_value)
         P_term = self.Kp * error
         D_term = self.Kd * self.previous_error
 
@@ -43,7 +44,8 @@ class Controller:
         return P_term + D_term
 
     def setPoint(self, set_point):
-        self.check_Set_Point_Bounds()
+        self.set_point = set_point  # Set the setpoint
+        self.check_Set_Point_Bounds()  # Ensure setpoint is within ROS angle domain
         self.previous_error = 0
 
     def setPD(self, P=0.0, D=0.0):
@@ -76,7 +78,7 @@ class Turtlebot():
         self.velocity = 0.5
 
         # Controller variables
-        self.controller = Controller(1.0)
+        self.controller = Controller(4)
         self.vel = Twist()  # Velocity X and Velocity Theta
 
         try:
@@ -101,23 +103,35 @@ class Turtlebot():
         T = 2
         c = 10  # May need to be tweaked!!
 
-        # X and Y end velocity (dx/dt | dy/dt)
-        v_end_x = (current_waypoint[0] - next_waypoint[0]) / T
-        v_end_y = (current_waypoint[1] - next_waypoint[1]) / T
+        # Derive end velocities
+        angle = atan2(next_waypoint[1] - current_waypoint[1],
+                      next_waypoint[0] - current_waypoint[0])  # Calculate velocity angle
+        if current_waypoint[0] * next_waypoint[0] + current_waypoint[1] * next_waypoint[1] != 0:
+            v_end_x = self.velocity * cos(angle)
+            v_end_y = self.velocity * sin(angle)
+        else:
+            v_end_x = 0
+            v_end_y = 0
 
-        aX = self.polynomial_time_scaling_3rd_order(self.previous_waypoint.item(0), self.previous_velocity.item(0), current_waypoint[0], v_end_x, T)  # Coefficients for 3rd order polynomial for X coordinates
-        aY = self.polynomial_time_scaling_3rd_order(self.previous_waypoint.item(1), self.previous_velocity.item(1), current_waypoint[1], v_end_y, T)  # Coefficients for 3rd order polynomial for Y coordinates
+        aX = self.polynomial_time_scaling_3rd_order(self.previous_waypoint.item(0), self.previous_velocity.item(0),
+                                                    current_waypoint[0], v_end_x,
+                                                    T)  # Coefficients for 3rd order polynomial for X coordinates
+        aY = self.polynomial_time_scaling_3rd_order(self.previous_waypoint.item(1), self.previous_velocity.item(1),
+                                                    current_waypoint[1], v_end_y,
+                                                    T)  # Coefficients for 3rd order polynomial for Y coordinates
 
         for i in range(c * T):
             t = i * 0.1
+
+            # Why are these values unnecessary?
             posX = aX.item(3) + aX.item(2) * t + aX.item(1) * pow(t, 2) + aX.item(0) * pow(t, 3)
             posY = aY.item(3) + aY.item(2) * t + aY.item(1) * pow(t, 2) + aY.item(0) * pow(t, 3)
 
             velX = aX.item(2) + 2 * aX.item(1) * t + 3 * aX.item(0) * pow(t, 2)
             velY = aY.item(2) + 2 * aY.item(1) * t + 3 * aY.item(0) * pow(t, 2)
 
-            # Update controller set point and velocity with values retrieved from polynomial fcn
-            self.controller.setPoint(atan2(posY, posX))
+            # Update controller set point and velocity with velocity values retrieved from polynomial fcn
+            self.controller.setPoint(atan2(velY, velX))
 
             self.vel.linear.x = sqrt(pow(velX, 2) + pow(velY, 2))
             self.vel.angular.z = self.controller.update(self.pose.theta)
