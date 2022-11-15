@@ -75,10 +75,10 @@ class Turtlebot():
         # Waypoint variables
         self.previous_waypoint = np.matrix([0, 0])
         self.previous_velocity = np.matrix([0, 0])
-        self.velocity = 0.5
+        self.velocity = 0.45
 
         # Controller variables
-        self.controller = Controller(4)
+        self.controller = Controller(5.48)
         self.vel = Twist()  # Velocity X and Velocity Theta
 
         try:
