@@ -2,6 +2,7 @@
 
 from math import pi, sqrt, atan2, cos, sin
 import numpy as np
+import json
 
 import rospy
 import tf
@@ -20,11 +21,21 @@ def checkBounds(error):
     return error
 
 
+class CourseMap:
+    def __init__(self, file_name):
+        self.course_file = open(file_name, "r")
+
+        # Load contents of map file
+        map_data = json.load(self.course_file)
+
+        self.start = (map_data["start"][0], map_data["start"][1])  # Extract start coord
+        self.goal = (map_data["goal"][0], map_data["goal"][1])  # Extract goal coord
+        self.obstacles = [(obstacle[0], obstacle[1]) for obstacle in map_data["obstacles"]]  # Extract obstacle coords
+
+
 class AStar:
-    def __init__(self, start, goal, obstacles):
-        self.obstacles = obstacles
-        self.start = start
-        self.goal = goal
+    def __init__(self, course_map):
+        self.course_map = course_map  # Environment map obtained from map_data.json
         pass
 
     def neighbors(self, current):
@@ -33,28 +44,22 @@ class AStar:
         return [(current[0] + nbr[0], current[1] + nbr[1]) for nbr in neighbor_coords]
 
     def heuristic_distance(self, candidate):
-        dx = abs(candidate[0] - self.goal[0])
-        dy = abs(candidate[1] - self.goal[1])
+        dx = abs(candidate[0] - self.course_map.goal[0])
+        dy = abs(candidate[1] - self.course_map.goal[1])
         return (dx + dy) + min(dx, dy) * (sqrt(2) - 2)
 
     def get_path_from_A_star(self):
-        # input  start: integer 2-tuple of the current grid, e.g., (0, 0)
-        #        goal: integer 2-tuple  of the goal grid, e.g., (5, 1)
-        #        obstacles: a list of grids marked as obstacles, e.g., [(2, -1), (2, 0), ...]
+        # input  none
         # output path: a list of grids connecting start to goal, e.g., [(1, 0), (1, 1), ...]
-        #   note that the path should contain the goal but not the start
-        #   e.g., the path from (0, 0) to (2, 2) should be [(1, 0), (1, 1), (2, 1), (2, 2)]
 
-        current = self.start  # Assign start to current (protects against empty set error)
+        current = self.course_map.start  # Assign start to current (protects against empty set error)
 
-        open_list = [(0, self.start)]
+        open_list = [(0, self.course_map.start)]
         closed_list = []
         path = []
 
-        cost = {self.start: 0}  # Cost Dictionary
-        parent = {self.start: "none"}  # Parent Dictionary
-
-        # Check if goal is obstacle
+        cost = {self.course_map.start: 0}  # Cost Dictionary
+        parent = {self.course_map.start: "none"}  # Parent Dictionary
 
         while open_list:
             open_list.sort()  # Sort list in ascending order
@@ -62,11 +67,11 @@ class AStar:
             closed_list.append(current)
 
             # Check if goal reached
-            if current == self.goal:
+            if current == self.course_map.goal:
                 break
 
             for candidate in self.neighbors(current):
-                if candidate in self.obstacles:  # Checked if candidate is not an obstacle
+                if candidate in self.course_map.obstacles:  # Checked if candidate is not an obstacle
                     continue
                 if candidate in closed_list:  # Checked if candidate has been visited
                     continue
@@ -79,7 +84,7 @@ class AStar:
                     final_cost = self.heuristic_distance(candidate) + cost[candidate]
                     open_list.append((final_cost, candidate))
 
-        while current != self.start:
+        while current != self.course_map.start:
             path.append(current)
             current = parent[current]
 
@@ -150,10 +155,8 @@ class Turtlebot():
         self.vel = Twist()  # Velocity X and Velocity Theta
 
         # AStar parameters
-        self.start = (0, 0)
-        self.goal = (9, 2)
-        self.obstacles = [(1, 0), (1, 1), (4, 1), (4, 2), (4, 3), (5, 1), (5, 2), (5, 3), (8, 0), (8, -1)]
-        self.a_star = AStar(self.start, self.goal, self.obstacles)
+        self.course_map = CourseMap("map_data.json")
+        self.a_star = AStar(self.course_map)
 
         try:
             self.run()
@@ -165,7 +168,7 @@ class Turtlebot():
 
     def run(self):
         waypoints = self.a_star.get_path_from_A_star()
-        waypoints.append(self.goal)
+        waypoints.append(self.course_map.goal)
 
         for i in range(len(waypoints) - 1):
             self.move_to_point(waypoints[i], waypoints[i + 1])
